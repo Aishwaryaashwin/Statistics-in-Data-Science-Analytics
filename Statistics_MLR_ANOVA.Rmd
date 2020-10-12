@@ -1,0 +1,646 @@
+---
+title: "Weight Prediction for Fish Market Data"
+author: "Aishwarya Mysore Ashwinkumar"
+date: "5/11/2020"
+output:
+ word_document:
+    reference: GDP_ref.docx
+    toc: yes
+bibliography: prj_ref.bib
+---
+
+```{r setup, include=FALSE, echo=TRUE,results='hide'}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\newpage  
+
+# 1.Introduction:
+
+There are around 34,000 recognized species of fishes all over the world. About 250 species of fishes are discovered every year. Fish markets have their stalls with different size of fishes.Tsukiji fish market in Tokyo, Japan, is the largest fish market in the world marketing about 660,000 fishes every year. This particular study focuses on predicting the weight of fish based on its dimensionality such as Height, Width and Length for a given species. The data is obtained from Fish Market Dataset. The study aims at understanding data with the help of statistical analysis and different visualizations performed on the data. Followed by building multiple linear regression models and assess them using statistical tests and select the best model among them.
+
+# 2.Research Question:
+
+The main agenda of the project is to investigate on how different variables contribute to our target variable, Weight. In this way one can learn on different statistical tests and analysis thats been carried out for selection of variables. Followed by modelling using multiple linear regression and selecting the best one. With this research i am going to answer the following research questions:
+
+**1. Which are the independent variables that contribute the most to the prediction?**  
+**2. Which is the best model to predict the weight of the fish?**
+
+# 3.Rationale:
+
+To answer my first question, I'm leveraging the backward elimination technique and Analysis of Variance (ANOVA) of statistics to decide on the selection of variables. For my second question, I am comparing two models and assessing them based on R2 score, Root mean squared error and detecting presence of heteroskedasticity inorder to select the best model.
+
+# 4.About the Dataset:
+
+I have gathered data pertaining to 7 different species of fishes which account to total of 160 records with 7 different columns such as Species, Width, Heigth, Length and Weight. The dataset is sourced at Kaggle. The column description is as shown below
+
+Column Name        	  | Description	                                  | Column type
+ -----------------------|-----------------------------------------------|------------
+ Species              	| Type of fish.                                 | Factor
+ Weight	                | Weight of the fish in grams.                  | Num
+ Height   	            | Height of the fish in cms.                    | Num
+ Width              	  | diagonal width of the fish in cms.            | Num
+ vert_len_cm            | Verticle length in cms.                       | Num
+ diag_len_cm          	| Diagonal length in cms.	                      | Num
+ cross_len_cm	          | Cross length in cms.                       	  | Num
+
+# 5.Libraries used:  
+
+```{r include=TRUE,echo=TRUE,results='hide',warning=FALSE,message=FALSE}
+
+#install.packages("nortest")
+#install.packages("corrplot")
+library(corrplot)
+library("ggthemes")
+library("gridExtra")
+library("dplyr")
+library("tidyr")
+library("data.table")
+library("ggplot2")
+library("GGally")
+library("caTools")
+library("lmtest")
+library("caret")
+library(plotly)
+library("ggpubr")
+library(magrittr)
+library(car)
+library(broom)
+library(psych)
+library(relaimpo)
+library(moments)
+library(nortest)
+#theme_update(axis.title = element_text(size = 20),axis.text = element_text(size = 12),title = element_text(size = 20))
+```
+
+# 6.Data Preperation:
+
+Load the dataset to “fish” dataframe. As a part of data preparation, data cleaning must be carried out which includes:  
+
+1. Handling the missing or blank values.  
+3. Renaming the Column Names.  
+4. Handling NAs by dropping those values.  
+5. Handling outliers.    
+6. Generating multiple other columns required for analysis.  
+
+
+```{r Loading and reading the dataset}
+#load the dataset and replace all the 0 with "NA". It is because height, weight, width or length cannot be 0.
+fish = read.csv("Fish.csv", na.strings=c("0","NA"),header=TRUE)
+```
+
+```{r}
+#reviewing the loaded data
+head(fish)
+```
+```{r}
+# looking at the column names
+colnames(fish)
+```
+
+6.1 Renaming the columns
+
+```{r}
+fish_df <- fish %>% 
+  rename(
+    Species=ï..Species,
+    vert_len_cm=Length1,
+    diag_len_cm=Length2,
+    cross_len_cm=Length3,
+     )
+```
+
+```{r}
+# renamed columns
+colnames(fish_df)
+```
+```{r}
+# checking for NAs
+#is.na(fish_df)
+```
+
+6.2 Dropping the values with NAs
+
+```{r}
+fish_df <- fish_df %>% drop_na()
+```
+
+6.3 Handling Outliers
+
+Both linear and multiple linear regressions are sensitive to outliers. Missing values and outliers can shift the focus. Hence it is necessary to handle them. From the fig1, we can see three values for weight and one each for vertical, diagonal and cross lengths which are detected as outliers. These outliers are filtered by removing them which is evident in fig2 where the outliers are handeled.
+
+```{r,fig.width=8.5}
+b <- ggplot(stack(fish_df),aes(x= ind,y=values))+geom_boxplot(aes(fill="blue"))+scale_y_continuous(breaks = seq(0,2000,100))+theme_bw()+labs(x="Columns", title= "Before handling Outliers",subtitle = "fig1")+theme(legend.position = "none")
+b
+
+fish_df <- fish_df%>% filter(Weight < 1500)
+
+c <- ggplot(stack(fish_df),aes(x= ind,y=values))+geom_boxplot(aes(fill="green"))+scale_y_continuous(breaks = seq(0,2000,100))+theme_bw()+labs(x="Columns",title= "After handling Outliers", subtitle = "fig2")+theme(legend.position = "none")
+c
+```
+
+6.4 Computing other columns from existing ones
+
+I am generating another column, "weight_group" from weight column which have the information on if the fish is under weight or healthy.
+
+```{r}
+fish_df <- fish_df %>% mutate(weight_group = case_when(
+        Weight >= 0 & Weight < 150 ~ "UnderWeight",
+       Weight >= 150 & Weight < 2000 ~ "Healthy"))
+fish_df$weight_group <- as.factor(fish_df$weight_group)
+```
+
+# 7.Exploratory Data Anlysis (EDA):
+
+This section focuses on understanding the variables behaviour in the dataset by levearaging different R packages and libraries to visualize them. It is the critical process of performing initial investigation on the data. 
+
+## 7.1 Most found Species
+
+The below donut chart tells us the quantity of each type found in the population. Among 7 different species of fishes in the data, Perch is the most found species. We can say for every 100 fishes, 36 of them would be Perch as it is contributing 36% to the overall population. Followed by Bream which is about 23% of the population and Roach which is about 12% of the population.
+
+```{r}
+df <- fish_df %>%
+      group_by(Species) %>%
+      tally()
+
+df$part = df$n / sum(df$n)
+
+df$ymax = cumsum(df$part)
+
+df$ymin = c(0, head(df$ymax, n=-1))
+
+ 
+
+df$label <- paste0(df$Species, "\n value: ", round((df$n/155)*100),"%")
+df$labelPosition <- (df$ymax + df$ymin) / 2
+ 
+# Make the plot
+ggplot(df, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Species)) +
+     geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=3.5) +
+  coord_polar(theta="y") +
+     xlim(c(2.5, 4))+
+  theme_void()+
+  theme(legend.position = "none")
+
+
+```
+
+## 7.2 Average Height and Width for each of these species
+
+From the below graph we see how the average height and width vary from species to species. Bream is the species having highest average height of 15 cms. Whereas Whitefish and Bream are the species having highest average diagonal width close to 5 cms. From this we can conclude that Bream is the species having highest average height and width dimensions. Whereas Smelt is the type with low height and width dimensionality.
+
+```{r}
+ df_plot2 <- fish_df %>%
+        group_by(Species) %>%
+        summarise(mean_ht=mean(Height, na.rm = TRUE),mean_wid=mean(Width, na.rm = TRUE))
+
+plot2 <- ggplot(df_plot2,aes(reorder(Species, mean_ht),mean_ht))+
+geom_col(aes(fill=Species))+
+geom_text(aes(label=mean_ht, hjust=8,vjust=3),size=4)+
+theme(axis.text.x = element_blank(),axis.ticks.x = element_blank())+
+labs(y="Height",x="Species")+ theme_bw(base_size = 10)+
+theme(axis.text.x = element_text(size=10,face="bold"),axis.text.y=element_text(size=10,face="bold"),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"),legend.position = "none")+
+coord_flip()
+
+plot3<- ggplot(df_plot2,aes(reorder(Species, mean_wid),mean_wid))+
+geom_col(aes(fill=Species))+
+geom_text(aes(label=mean_wid, hjust=8,vjust=3),size=4)+
+theme(axis.text.x = element_blank(),axis.ticks.x = element_blank())+
+labs(y="Width",x="Species")+ theme_bw(base_size = 10)+
+theme(axis.text.x = element_text(size=10,face="bold"),axis.text.y=element_text(size=10,face="bold"),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"),legend.position = "none")+
+coord_flip()
+
+ggarrange(plot2,plot3,n=1)
+
+```
+
+## 7.3 Distribution of Weight, Height and Width along the horizontal plane
+
+The below graph shows how the variables weight, height and width are distributed along the horizontal axis which are grouped by species. Weight is right skewed with a right tail where the mean is greater than the median. For Height and Width, there is no as such skewness and the frequency is more or less constant. Weight for different species mostly lie between 0 to 500 grams. Height for different species lie between 5 to 15 cms. Width for different species mostly lie between 2 to 6 cms.
+
+```{r}
+plt1 <- ggplot(fish_df,aes(x=Weight,fill=Species))+
+  geom_histogram(alpha=0.5,col="black",bins=30)+theme(legend.position = "none",axis.text.x = element_text(size=10,face="bold"),axis.text.y=element_text(size=10,face="bold"),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"))
+plt2 <- ggplot(fish_df,aes(x=Height,fill=Species))+
+  geom_histogram(alpha=0.5,col="black",bins=30)+theme(legend.position = "none",axis.text.x = element_text(size=10,face="bold"),axis.text.y=element_text(size=10,face="bold"),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"))
+plt3 <- ggplot(fish_df,aes(x=Width,fill=Species))+
+  geom_histogram(alpha=0.5,col="black",bins=30)+theme(legend.position = "none",axis.text.x = element_text(size=10,face="bold"),axis.text.y=element_text(size=10,face="bold"),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"))
+
+ggarrange(plt1,plt2,plt3,n=1)
+```
+
+## 7.4 Ratio of healthy to under weighted fishes for each Species
+
+Below graph tells us how many healthy and under weighted fishes each of these species have. Bream is the type with more healthy fishes and no under weighted fish which means all of these fishes are above 150 grams. Perch is the species having balanced healthy and under weighted fishes. Whereas Smelt is the species with only under weighted fishes.
+
+```{r}
+df_plot2 <- fish_df %>%
+        group_by(weight_group,Species) %>%
+        tally()
+
+p<-ggplot(df_plot2, aes(x=weight_group, y=n)) +
+  geom_col(aes(fill=weight_group)) + facet_grid(. ~Species)+
+  theme_classic() +
+   theme(strip.text.x = element_text(size = 10, colour = "red", angle = 90))+
+  theme(axis.text.x = element_blank(),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"))+
+ labs(y="number",x="Healthy or under weight")
+    #theme(strip.text.x = element_text(size = 2),
+          #strip.text.y = element_text(size = 2))
+p
+
+```
+
+## 7.5 Variation of verticle, diagonal and cross length from species to species
+
+The below graph shows the variation of length in each species. More the area of the stack, more the length. Pike is the species with more verticle, diagonal and cross length which is positioned 4th from top of the stack. Followed by Bream which is at top of the stack. Smelt is the species with smallest verticle, diagonal and cross length colored in purple.
+
+```{r}
+fish_len <- fish_df %>%
+  group_by(Species) %>%
+        summarise(vert_ln=mean(vert_len_cm, na.rm = TRUE),dig_len=mean(diag_len_cm, na.rm = TRUE),crs_len=mean(cross_len_cm, na.rm = TRUE))
+
+grp1 <- ggplot(fish_len, aes(x="vert_ln", y=vert_ln, fill=Species))+
+geom_bar(width = 0.5,height=0.5, stat = "identity")+theme_classic()+ theme(legend.position = "none",axis.text.x = element_blank(),axis.ticks.x = element_blank(),axis.text.y = element_blank(),axis.ticks.y = element_blank())+ labs(title="Verticle",y="",x="")
+grp2 <- ggplot(fish_len, aes(x="dig_len", y=dig_len, fill=Species))+
+geom_bar(width = 0.5,height=0.2, stat = "identity")+theme_classic()+ theme(legend.position = "none",axis.text.x = element_blank(),axis.ticks.x = element_blank(),axis.text.y = element_blank(),axis.ticks.y = element_blank())+ labs(title="diagonal",y="", x="")
+grp3 <- ggplot(fish_len, aes(x="crs_len", y=crs_len, fill=Species))+
+geom_bar(width = 0.5,height=0.5, stat = "identity")+theme_classic() + theme(legend.position = "bottom",axis.text.x = element_blank(),axis.ticks.x = element_blank(),axis.text.y = element_blank(),axis.ticks.y = element_blank())+ labs(title="cross",y="", x="",prob=TRUE, cex.main= 0.1)
+ggarrange(grp1,grp2,grp3,nrow=1)
+
+  
+```
+
+## 7.6 Weight distribution among different species
+
+The below graph shows how the average weight varies for different species of fishes. The dashed line gives us the mean weight for each of these species. The density plot gives the weight distribution for each species. Bream is the species with more healthy fishes or fishes with more weight. Smelt is the species having fishes which are less in weight.
+
+```{r}
+plot_df3 <- fish_df %>%
+              group_by(Species)%>%
+              summarise(mean_wt=mean(log(Weight)))
+
+
+ggplot(fish_df,aes(x=log(Weight),fill=Species,color=Species,group=Species))+
+  geom_density(alpha=0.4,lwd=1)+
+  geom_vline(data=plot_df3,aes(xintercept = mean_wt,color=Species),lwd=2,lty="dotdash")+
+  scale_x_continuous(limits = c(1.5,8.5))+ labs(x="weight", y="values", title="Weight Distribution",axis.text.x = element_text(size=10,face="bold"),axis.text.y=element_text(size=10,face="bold"),axis.title.y=element_text(size=11,face="bold"),axis.title.x=element_text(size=11,face="bold"))
+
+```
+
+
+# 8.Distribution and correlation of variables
+
+In order to increase the performance and obtain better results, Linearity, Normality and correlation needs to be checked. The below pair plot gives the normal distribution of the variables which are denoted with the histogram and a curve on it. The correlation between each of these variables which are numerical values ranging from 0.76 to 0.99. The scatterplot with a line gives us the relation between the variables based on linearity.
+
+```{r,fig.width=8,fig.height=6}
+pairs.panels(fish_df[c("Weight", "vert_len_cm", "diag_len_cm", "cross_len_cm","Height","Width")])
+```
+
+## 8.1 Checking Normality for the variables with histogram
+
+It is very important to know the distribution of the samples. Sometimes we have samples but have no idea on how it is distributed.Normal distribution peaks in the middle and is symmetrical about the mean. If there is more deviation of the normal curve(bell shaped curve) from the histogram bins, then we say there is no normal distribution. If the normal curve fits along the bins then we say it is normally distributed. The variable weight is some what right skewed which means it is positively skewed and lacks in normal distribution. Where as few of the variables are somewhat symmetrical about the mean which shows normal distribution. If the data is not normally distributed then we can transform the data to get it normally distributed for which i am performing log transform which i will be explaining later in the analysis.
+
+## 8.2 Linear relation among the variables
+
+In order to perform a linear or multiple linear regression, our data needs to be linearly distributed. Mainly our dependant variable and our independant variables needs to be linearly correlated with each other. We see the variables are some what linearly correlated. Perfect linearity is when those scatter plots falls exactly on the line which is not possible in real scenarios.However, We can fix the issue of linearity by transforming the data.
+
+## 8.3 Correlation
+
+We see the data seem to be higly correlated. Values close to 1 shows high correlation and with those near to zero show less correlation. The independant variables needs to be correlated with the target variable when performing linear regression. Here we can see that our independant variables are correlated with our target variable, Weight. The below heatmap explains it more precisely.  
+
+### 8.3.1 Correlation heatmap to check the colinearity among the variables
+
+The below heatmap tells us the correlation among variables. The values close to 1 or having pitch shade of blue show high correlation. Whereas the value close to 0 or with light shade of blue show less correlation. The predictor variables needs to be correlated with our prediction variable. We see vert_len_cm, diag_len_cm, cross_len_cm, Height and width are highly correlated with our target variable weight. But variables vert_len_cm, diag_len_cm and cross_len_cm seem to be highly correlated among themselves which introduce the problem of multicolinearity which needs to be handeled for regression models. I am handling the multicolinearity by introducing one column pertaining to length instead of having three different columns.
+
+```{r}
+M <- cor(fish_df[c("Weight", "vert_len_cm", "diag_len_cm", "cross_len_cm","Height","Width")])
+corrplot(M, method = "circle")
+
+cormat <- round(cor(fish_df[c("Weight", "vert_len_cm", "diag_len_cm", "cross_len_cm","Height","Width")]),2)
+head(cormat)
+
+
+```
+
+I am taking the mean of all three lengths,vert_len_cm, diag_len_cm and cross_len_cm and computing a single column length.mean which handles the multicolinearity . Here we remove the colinear variables.
+
+```{r}
+# computing length.mean column which is mean of vert_len_cm, diag_len_cm and cross_len_cm
+fish_df_new <- fish_df
+fish_df_new$length.mean = apply(fish_df_new[,c(3:5)],1,mean)
+fish_df_new$length.mean <- round(fish_df_new$length.mean, digits = 2)
+
+
+cormat <- round(cor(fish_df_new[c("Weight", "length.mean","Height","Width")]),2)
+head(cormat)
+```
+
+
+## 8.4 Q-Q plot for normality check
+
+Q-Q plot is one more method to assess normality and is feasible when the sample size is less. The data or the scatter plots should be as close to the perfect normal distribution line. If the deviation from the staright line are minimal then we say data is normally distributed. If the points follow some other pattern other than staright line then we say lack of normal distribution.
+For weight and height, the points some what deviate from the line of perfect normal distribution. Whereas for Width and meanLength, the points are close to line.
+
+```{r}
+qqnorm(fish_df$Weight,main = "Q-Q plot for weight");
+qqline(fish_df$Weight)
+
+qqnorm(fish_df$Height,main = "Q-Q plot for Height");
+qqline(fish_df$Height)
+
+qqnorm(fish_df$Width,main = "Q-Q plot for Width");
+qqline(fish_df$Width)
+
+qqnorm(fish_df_new$length.mea,main = "Q-Q plot for Mean length");
+qqline(fish_df_new$length.mean)
+
+```
+
+## 8.5 Skewness and Kurtosis:
+
+There are many tools for checking the validity of the assumption of normality in R. Among those i have chosen skewness and kurtosis to check normality. Skewness is the measure of symmetry or lack of symmetry. If skewness is zero then the data is symmetrically distributed accross the mean. If skewness is negative then it is left skewed. Kurtosis is to measure if the data is heavily tailed or not. If data is heavily tailed it also infers presence of outliers. The acceptable values for skewness and kurtosis range from 0 to 3 to tell about the normal distribution of the data.
+
+```{r}
+skewness(fish_df$Weight)
+kurtosis(fish_df$Weight)
+
+skewness(fish_df$Height)
+kurtosis(fish_df$Height)
+
+skewness(fish_df$Width)
+kurtosis(fish_df$Width)
+
+skewness(fish_df_new$length.mean)
+kurtosis(fish_df_new$length.mean)
+```
+
+# 9.Multiple Linear Regression:
+
+# 9.1 Variable selection for multiple linear regression.
+
+## 9.1.1 Backward elimination
+
+In backward elimination, all the independant variables are entered into the equation first and each one is deleted if they dont contribute to the regression equation. It is as follows:
+
+1. Fit the model with all required independant variables.
+2. Consider the predictor with highest p-value.
+3. Remove the predictor and redo the steps until u get lowest p-values.
+
+For the first multiple linear regression model, I am passing all the values except the categorical variables, Species and weight_group.
+
+```{r}
+model1 <- lm(Weight ~.-Species -weight_group, data = fish_df)
+summary(model1)
+```
+The p-value seems to be much higher for variables width, vert_len_cm, diag_len_cm and cross_len_cm. Suggesting these variables are not significant for the model. Also the number of stars (***) beside the p-values tell us how strongly the predictor varibale is contributing to the output. 3 stars shows high significance and no stars tell us least significance. Also the high p-values might be because of strong correlation between vert_len_cm, diag_len_cm and cross_len_cm. We can overcome this by removing the colinear variables and introducing a new variable.
+
+For my second model, I have introduced a new variable length.mean by removing other three columns peratining to length. This length.mean was previously computed by taking the mean of vert_len_cm, diag_len_cm and cross_len_cm to overcome multicolinearity.
+
+```{r}
+model2 <- lm(Weight ~ Height + Width + length.mean, data = fish_df_new)
+summary(model2)
+
+```
+The p-values for all the variables is now very less compared to the previous model. All the variables have 3stars which means they are highly significant to the model. We see R2 value has decreased. But we dont use R2 value to compare between two models with different number of independant variables. However for backward elimination, we are concerned with p-values for variable selection.
+
+
+## 9.1.2 Model comparison for selection of variables using ANOVA
+
+Analysis of variance provides "F-test" which explains the variance in our data after various modifications have been done. Hence we can leverge it to compare the models to see if we have selected the apt independant variables for our model or not.
+
+F test
+
+```{r}
+# anova test
+anova(model1, model2, test="F")
+```
+
+Here we see the p-value for the second model to be less than 0.05 (p<0.05). Hence we reject null hypothesis and there is significant difference between the two variances. Model2 is better than my model1. In simpler terms using two extra variables did not significantly affect the target variable, Weight. Hence it is better to use Model2 with three independant variables rather than model1 with 5 independant variables.
+
+From the results of backward elimination and ANOVA, I conclude that Height, Width and Mean length are the independant variables that contribute the most to my target variable, Weight.
+
+
+# 9.2 Model Selection
+
+Now that we have decided on the variables that should go into the multiple linear regression model. Lets's see if the existing model suffice or needs to be transformed for better performance.
+
+Splitting the dataset into training and testing set. 70% goes into training and 30% into testing. "set.seed()" is used to randomly shuffle our dataset and the values are assigned to testing and training after shuffling.
+
+```{r}
+set.seed(1234)
+ind <- sample(2, nrow(fish_df_new), 
+              replace = TRUE, 
+              prob = c(0.7, 0.3))
+training <- fish_df_new[ind==1,]
+testing <- fish_df_new[ind==2,]
+
+```
+
+```{r}
+cat("Length of training set:",length(training$Weight))
+cat("\nLength of testing set:",length(testing$Weight))
+
+```
+
+## 9.2.1 First Model: Normal model
+
+This is the normal model which is built using the independant variables which were selected from our previous analysis. I am passing height,width and mean length to predict weight to the multiple linear regression equation.
+
+```{r}
+model_without_log <- lm(Weight ~ Height + Width + length.mean, data = training)
+summary(model_without_log)
+```
+
+p-value for the model seem to be quite low. Multiple R-squared is about 90.12% and Adjusted R-squared is about 89.86%. Residual standard error is 95.47 and the standard errors for each of these variables are quite significant. 
+
+```{r}
+plot(Weight~Height + Width + length.mean, training)
+```
+
+Relation between the independant and dependant variables. From the above plots we see the relation between weight and all the independant variables, height, width and mean length is not perfectly linear. A linear model does not capture the non-linearity between the dependant and independant variables.
+We need to fix this issue by transforming our data to linearize the relation between target variable Weigth and independant variables height, width and mean length.
+Hence i am transforming the data using log transform on all the variables in the equation to check if it solves the issue of non-linearity.  
+
+## 9.2.2 Second Model: Log Transformed Model
+
+I am applying logarithmic function for each of the variables in the equation. Usually the log transformation is performed to achieve linearity among dependant and independant variables. Also if the data is right skewed, we apply log transform. In the normality graph, we saw that the distribution for weight is positively skewed (skewed right).
+
+Now lets compute the log transformed model and analyse the outcome.
+```{r}
+model_with_log <- lm(log(Weight) ~ log(Height) + log(Width) + log(length.mean), data = training)
+summary(model_with_log)
+plot(log(Weight) ~ log(Height) + log(Width) + log(length.mean), data = training)
+
+
+```
+
+p-value for the model remains same. Multiple R-squared is about 99.49% and Adjusted R-squared is about 99.48%. Residual standard error is 0.08822 and the standard errors for each of these variables have reduced. We see a significant improvement in the R squared value and the standard errors.
+Also from the plots we see a linear relationship between the dependant and independant variables. Hence by transforming the data, non-linearity can be eliminated.
+
+
+
+## 9.2.3 Affect of data transformation on residuals
+
+###  9.2.3.1 Distribution of residuals for normal model
+
+We plot the residuals mainly to check if the observations are heteroskedastical or homoskedastical. Heteroskedasticity occurs when the variance for all observations in a data set are not same. Whereas homoskedasticity occur when the variance of all the variables are equal.
+
+One way of detecting Heteroskedasticity is by creatig the residal plots where we plot the least squares residuals against the target variable. The below residual plot from fig1 shows a visible pattern and is not uniformly distributed about the axis. If the model explains the relationship between the dependent variable and the indipendent variable, then there would be no evident pattern. Hence we can see more variation between our independant variables and weight.
+
+The below sub plots gives the variance of the independant variables with weight. More the points deviate from the blue dashed line, more the variance. We see a significant and high deviation of these points from the reference line. So there is more variation between height, width and mean length with weight.
+
+```{r}
+residplot<- data.frame(residuals=model_without_log$residuals,Weight=training$Weight)
+
+
+ggplot(residplot,aes(x=Weight,y=residuals))+
+  geom_hline(yintercept = 0,size=2,lty="dashed",alpha=0.4)+
+  geom_point(size=3,alpha=0.7)+labs(title="Residual v/s Weight", subtitle = "fig1")
+
+ceresPlots(model_without_log,main = "residual variation of weight with independant variables")
+```
+
+### 9.2.3.2 Distribution of residuals for log transformed model
+
+From the fig1, we see no evident scheme or pattern followed by the points. It does not seem to look there is more variation between the independant and dependant variables. From the second plot, the deviation of the points for log(height), lof(Width) and log(mean.length) variables from the reference line is very less. They seem to be perfectly fitted along the reference line showing negligible or no variance. Hence the log transformed model captures the real relationship between Weight and Height, width and mean length.
+
+```{r}
+residplot_log<- data.frame(residuals=model_with_log$residuals,Weight=training$Weight)
+
+ggplot(residplot_log,aes(x=Weight,y=residuals))+
+  geom_hline(yintercept = 0,size=2,lty="dashed",alpha=0.4)+
+  geom_point(size=3,alpha=0.7)+labs(title="Residual v/s Weight for log transformed", subtitle = "fig1")
+
+```
+```{r,fig.width=10}
+ceresPlots(model_with_log,main = "residual variation of weight with transformed independant variables")
+```
+
+
+## 9.2.4 NCV test
+
+To be more sure and precise with my findings, I am performing NCV test to check if the residuals are heteroscadastical. From the test results, the obtained p-value is greater than 0.05, which means null hypothesis is not rejected. Hence no heteroscadasticity. 
+
+```{r}
+car::ncvTest(model_with_log)
+```
+
+# 9.3 Prediction
+
+Using the two fitted multiple linear regression models, i will be predicting weight for the observations that are present in the testing set.
+
+## 9.3.1 Prediction using Normal model
+
+Below are the predicted values from the normal model. There are few ngative values from our prediction and we know that weight can never be negative.
+
+By plotting the actual and predicted values, one can easily visualize how well the data points are concentrated and distributed around the regression line. More deviation of data points from the regression line, more the variance. Less the predicted values(pred(y)) deviate from actual ones(y), higher the robustness of the model.
+
+From the graph it is evident that the predicted values some what deviate from the regression line. With this normal model, I am unable to obtain optimal results.
+
+```{r}
+pred_without_log <- predict(model_without_log,testing)
+pred_without_log
+plot <-  ggplot()  + 
+    geom_point(aes(pred_without_log, testing$Weight)) + 
+    geom_smooth(aes(pred_without_log, testing$Weight), method = "lm", se = FALSE, color = "Red") + 
+    labs(x = "Predicted", y = "Actual", title = "Normal model" ) + 
+    theme_bw()
+plot
+```
+
+## 9.3.2 Prediction using Log transformed model
+
+Below are the predicted values from the Log transformed model. There are no negatively predicted values from this model. Also the plot show very minimal or negligible deviation from the regression line indicating less variance and more accuracy.
+
+```{r}
+pred_with_log_trans <- exp(predict(model_with_log,testing))
+pred_with_log_trans
+
+plot <-  ggplot()  + 
+    geom_point(aes(pred_with_log_trans, testing$Weight)) + 
+    geom_smooth(aes(pred_with_log_trans, testing$Weight), method = "lm", se = FALSE, color = "Red") + 
+    labs(x = "Predicted", y = "Actual", title = "Log Transformed model" ) + 
+    theme_bw()
+plot
+```
+
+# 9.4 Model Evaluation:
+
+## 9.4.1 Evaluation using plots
+
+From the below plot it is evident that the predictions made using log tranformed model the one with red dots are very close to actual values that is with yellow dots than the predictions made using normal model identified using green dots. 
+
+log transformed predictions - red dots  
+
+normal model predictions - green dots  
+
+actual values - yellow dots  
+
+The plots and dataframe values infer that the predictions made from transformed model are more accurate and close to actuals.
+
+```{r}
+pred_plot <- data.frame(log_predicted=pred_with_log_trans,pred_normal=pred_without_log,actual_values=testing$Weight,unit = seq(1,length(testing$Weight),by=1))
+
+ggplot(pred_plot,aes(x=unit,y=actual_values))+
+  geom_point(col="yellow",size=6,alpha=0.7)+
+  geom_point(aes(x=unit,y=pred_normal),col="green",size=4,alpha=0.7)+
+  geom_point(aes(x=unit,y=log_predicted),col="red",size=4,alpha=0.7)+
+  scale_x_continuous(breaks=seq(1,48,by=2),labels  =seq(1,48,by=2),minor_breaks = NULL)
+
+pred_plot
+```
+
+## 9.4.2 Evaluation using R2
+
+R-squared is a statistical measure that tells on how close the data is fitted on to the regression line. It is also the coefficient of determination for regression.
+Variance is the measure that tell how far the actual value differ from the average of predicted values(predicted mean value).This is quantified using R2.
+
+We see that normal model predicts only 88.2% of the values accurately, whereas log transformed model predicts 98% of the values accurately.
+More closer the R2 value to 1, higher the accuracy.
+
+```{r}
+R2(pred_without_log,testing$Weight)
+
+R2(pred_with_log_trans,testing$Weight)
+```
+
+## 9.4.3 Evaluation using RMSE
+
+Root Mean Square Error(RMSE) is the standard deviation of the residuals (It is the difference between the actuals and predicted values called prediction errors). Residuals tell us how far the data points are from the regression line. It tells how far and how concentrated are the data points around the best fit line. Calculated as follows:
+1. Sqauring the residuals
+2. Taking the mean of the residuals
+3. Taking the square root of the result
+
+```{r}
+RMSE(pred_without_log,testing$Weight)
+
+RMSE(pred_with_log_trans,testing$Weight)
+```
+The root mean squared error for the normal model is 132.87 whereas RMSE for log transformed model is 51.6. The error is reduced by more than 50% in the log transformed model.Lower the RMSE of the model, higher the accuracy.
+
+Hence I conclude that the Log transformed model is the best model to predict the weight of the fish.
+
+
+# 10.Conclusion:
+
+The above detailed analysis infers that height, width and mean length are the most contributing independent variables to predict target variable weight. These variables were selected using backward elimination technique in multiple linear regression and analysis of variance for comparing two models with different number of independant variables.Also the normailty, linearity and correlation of the variables are validated and handled. Using these independent variables two multiple linear regression models were constructed. On comparing, the log transformed model seem to provide better results in terms of RMSE, R2 and distribution of residuals. We saw that the log transformed model produced only positive predictions where as non-transformed model produced few non positive values which might be an issue if we want only positive values. Hence log transformed model is by far the best model to predict the weight of a fish. 
+
+\newpage
+
+# 11.Reference
+
+@RN1:
+
+
+
+
+
+
+
+
+
+
+
+
+
